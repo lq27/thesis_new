@@ -1,0 +1,88 @@
+data {
+
+    // Metadata
+    int T; // number of trials per block 
+    int B; // number of blocks 
+
+    // Data
+    int Y[T*B]; // agent's decision at trial T 
+    real R[T*B]; // reward given at trial T
+    real S[T*B]; // sure choice option at trial T
+    
+    int p; // print debugging option 
+    real q0_scale; // scaling q0 initial value for phi approx transform
+    real q0_shift; // shifting q0 initial value for phi approx transform 
+    
+}
+
+parameters {
+
+    // Parameters
+    real pos_eta_pr;     // Learning rate
+    real neg_eta_pr;     // Learning rate
+    real q0_pr;      // initial q value 
+    real beta; 
+    real alpha_pr;
+}
+
+transformed parameters {
+
+    real pos_eta = Phi_approx(pos_eta_pr);
+    real neg_eta = Phi_approx(neg_eta_pr);
+    real q0 = Phi_approx(q0_pr) * q0_scale + q0_shift; 
+    real alpha = Phi_approx( alpha_pr ) * 2;
+}
+
+model {
+
+    real Q = q0;
+
+    // Priors 
+    beta ~ normal(0, 1);
+    pos_eta_pr ~ normal(0, 1); 
+    neg_eta_pr ~ normal(0, 1); 
+    q0_pr ~ normal(0, 1);
+    alpha_pr ~ normal(0,1);
+    
+    
+    if(p > 0) {
+                print("***************************************")
+                print(pos_eta)
+                print(neg_eta)
+                print(beta)
+                print("----------------------------------------")
+    }
+    
+    
+    // Main loop
+    for(b in 1:B) {
+    
+        Q = q0; 
+        
+        for (t in 1:T) {
+        
+            // Note: Y = 0 --> 2 (no 0-index in stan) = sure choice; Y = 1 --> 1 = risky choice 
+
+            // calculate overal trial number for indexing into agglomerate arrays 
+            int trials_per_block = T; 
+            int i = ((b-1) * trials_per_block) + t;
+
+            real sure_value = S[i];
+            int option_chosen = 2-Y[i];
+
+            // Choice likelihood 
+            //Y[i] ~ bernoulli_logit( beta * (Q - sure_value));
+            Y[i] ~ bernoulli_logit( beta * ( pow(Q, alpha) - pow(sure_value, alpha)) ); 
+
+            // Compute RPE and update (asymmetric learning rates)
+            if(R[i] > Q) {
+                Q += pos_eta * (R[i] - Q);    
+            }
+            else {
+                Q += neg_eta * (R[i] - Q);
+            }
+
+        }
+    }
+
+}
